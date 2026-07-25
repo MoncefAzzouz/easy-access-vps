@@ -2,7 +2,7 @@
   "name": "easy-vps",
   "displayName": "Easy VPS",
   "description": "Browse and edit VPS files in VS Code Explorer over SSH/SFTP.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "engines": {
     "vscode": "^1.107.0"
   },
@@ -18,13 +18,44 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
+    "onView:easyVps.connections",
+    "onCommand:easy-vps.add",
     "onCommand:easy-vps.connect",
     "onCommand:easy-vps.disconnect",
     "onCommand:easy-vps.forgetConnection",
     "onFileSystem:easy-vps"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "easyVps",
+          "title": "Easy VPS",
+          "icon": "resources/server.svg"
+        }
+      ]
+    },
+    "views": {
+      "easyVps": [
+        {
+          "id": "easyVps.connections",
+          "name": "Connections"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "easyVps.connections",
+        "contents": "Connect in two steps: enter user@host, then your password.\n[Add VPS](command:easy-vps.add)\n[Import SSH Config](command:easy-vps.importSshConfig)"
+      }
+    ],
     "commands": [
+      {
+        "command": "easy-vps.add",
+        "title": "Add VPS",
+        "category": "Easy VPS",
+        "icon": "$(add)"
+      },
       {
         "command": "easy-vps.connect",
         "title": "Connect to VPS",
@@ -40,17 +71,85 @@
         "command": "easy-vps.forgetConnection",
         "title": "Forget Saved Connection",
         "category": "Easy VPS"
+      },
+      {
+        "command": "easy-vps.advancedAdd",
+        "title": "Add VPS (Advanced)",
+        "category": "Easy VPS"
+      },
+      {
+        "command": "easy-vps.test",
+        "title": "Test Connection",
+        "category": "Easy VPS",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "easy-vps.edit",
+        "title": "Edit Connection",
+        "category": "Easy VPS",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "easy-vps.openPath",
+        "title": "Open Remote Path",
+        "category": "Easy VPS"
+      },
+      {
+        "command": "easy-vps.importSshConfig",
+        "title": "Import from SSH Config",
+        "category": "Easy VPS"
+      },
+      {
+        "command": "easy-vps.refresh",
+        "title": "Refresh Connections",
+        "category": "Easy VPS",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "easy-vps.add",
+          "when": "view == easyVps.connections",
+          "group": "navigation@1"
+        },
+        {
+          "command": "easy-vps.refresh",
+          "when": "view == easyVps.connections",
+          "group": "navigation@2"
+        },
         {
           "command": "easy-vps.connect",
           "when": "view == workbench.explorer.fileView",
           "group": "navigation@1"
         }
       ],
+      "view/item/context": [
+        {
+          "command": "easy-vps.connect",
+          "when": "view == easyVps.connections",
+          "group": "inline@1"
+        },
+        {
+          "command": "easy-vps.test",
+          "when": "view == easyVps.connections",
+          "group": "easyVps@1"
+        },
+        {
+          "command": "easy-vps.edit",
+          "when": "view == easyVps.connections",
+          "group": "easyVps@2"
+        },
+        {
+          "command": "easy-vps.forgetConnection",
+          "when": "view == easyVps.connections",
+          "group": "easyVps@3"
+        }
+      ],
       "commandPalette": [
+        { "command": "easy-vps.add" },
+        { "command": "easy-vps.advancedAdd" },
+        { "command": "easy-vps.importSshConfig" },
         {
           "command": "easy-vps.connect"
         },

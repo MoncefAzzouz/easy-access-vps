@@ -4,7 +4,9 @@ import * as vscode from 'vscode';
 
 const SCHEME = 'easy-vps';
 const PROFILES_KEY = 'easy-vps.profiles';
+const LAST_PATH_KEY = 'easy-vps.lastRemotePath';
 type AuthType = 'password' | 'privateKey';
+const COMMON_REMOTE_PATHS = ['/root', '/home', '/var/www', '/etc', '/opt', '/srv', '/tmp'];
 
 interface ConnectionProfile {
 	id: string;
@@ -24,14 +26,34 @@ interface ActiveConnection {
 
 export function activate(context: vscode.ExtensionContext): void {
 	const provider = new SftpFileSystemProvider(context);
+	const connections = new ConnectionTreeProvider(context, provider);
 	context.subscriptions.push(
 		vscode.workspace.registerFileSystemProvider(SCHEME, provider, {
 			isCaseSensitive: true,
 			isReadonly: false,
 		}),
-		vscode.commands.registerCommand('easy-vps.connect', () => connectToVps(context, provider)),
+		vscode.window.registerTreeDataProvider('easyVps.connections', connections),
+		vscode.commands.registerCommand('easy-vps.add', () => quickAddVps(context, provider, connections)),
+		vscode.commands.registerCommand('easy-vps.connect', (item?: ConnectionItem) =>
+			item ? connectProfile(context, provider, item.profile, connections) : connectToVps(context, provider, connections)),
+		vscode.commands.registerCommand('easy-vps.advancedAdd', async () => {
+			const profile = await promptForProfile();
+			if (profile) {
+				await connectProfile(context, provider, profile, connections);
+			}
+		}),
+		vscode.commands.registerCommand('easy-vps.test', (item: ConnectionItem) =>
+			testConnection(context, provider, item.profile)),
+		vscode.commands.registerCommand('easy-vps.edit', (item: ConnectionItem) =>
+			editConnection(context, provider, connections, item.profile)),
+		vscode.commands.registerCommand('easy-vps.openPath', (item: RemotePathItem) =>
+			openRemotePath(context, provider, connections, item.profile, item.remotePath)),
+		vscode.commands.registerCommand('easy-vps.importSshConfig', () =>
+			importSshConfig(context, connections)),
+		vscode.commands.registerCommand('easy-vps.refresh', () => connections.refresh()),
 		vscode.commands.registerCommand('easy-vps.disconnect', () => disconnectFromVps(provider)),
-		vscode.commands.registerCommand('easy-vps.forgetConnection', () => forgetConnection(context, provider)),
+		vscode.commands.registerCommand('easy-vps.forgetConnection', (item?: ConnectionItem) =>
+			forgetConnection(context, provider, connections, item?.profile)),
 		provider,
 	);
 }
@@ -39,6 +61,7 @@ export function activate(context: vscode.ExtensionContext): void {
 async function connectToVps(
 	context: vscode.ExtensionContext,
 	provider: SftpFileSystemProvider,
+	connections: ConnectionTreeProvider,
 ): Promise<void> {
 	const profiles = getProfiles(context);
 	const choices: Array<vscode.QuickPickItem & { profile?: ConnectionProfile }> = [
@@ -58,7 +81,15 @@ async function connectToVps(
 	if (!profile) {
 		return;
 	}
+	await connectProfile(context, provider, profile, connections);
+}
 
+async function connectProfile(
+	context: vscode.ExtensionContext,
+	provider: SftpFileSystemProvider,
+	profile: ConnectionProfile,
+	connections?: ConnectionTreeProvider,
+): Promise<void> {
 	let secret: string | undefined;
 	if (profile.authType === 'password') {
 		secret = await context.secrets.get(secretKey(profile.id));
@@ -87,6 +118,8 @@ async function connectToVps(
 					await context.secrets.store(secretKey(profile.id), secret);
 				}
 				await saveProfile(context, profile);
+				await context.globalState.update(LAST_PATH_KEY, profile.remotePath);
+				connections?.refresh();
 				const uri = vscode.Uri.from({ scheme: SCHEME, authority: profile.id, path: profile.remotePath });
 				const existing = vscode.workspace.workspaceFolders?.find((folder) => folder.uri.toString() === uri.toString());
 				if (!existing) {
@@ -103,6 +136,48 @@ async function connectToVps(
 			}
 		},
 	);
+}
+
+async function quickAddVps(
+	context: vscode.ExtensionContext,
+	provider: SftpFileSystemProvider,
+	connections: ConnectionTreeProvider,
+): Promise<void> {
+	const address = await ask(
+		'SSH address',
+		'root@203.0.113.10 or ubuntu@example.com:2222',
+		undefined,
+		(value) => parseSshAddress(value) ? undefined : 'Use username@host or username@host:port',
+	);
+	if (!address) {
+		return;
+	}
+	const parsed = parseSshAddress(address);
+	if (!parsed) {
+		return;
+	}
+	const profile: ConnectionProfile = {
+		id: `${slug(parsed.host)}-${Date.now().toString(36)}`,
+		name: parsed.host,
+		host: parsed.host,
+		port: parsed.port,
+		username: parsed.username,
+		remotePath: context.globalState.get<string>(LAST_PATH_KEY, '/'),
+		authType: 'password',
+	};
+	await connectProfile(context, provider, profile, connections);
+}
+
+function parseSshAddress(value: string): { username: string; host: string; port: number } | undefined {
+	const match = /^([^@\s]+)@([^:\s]+)(?::(\d{1,5}))?$/.exec(value.trim());
+	if (!match) {
+		return undefined;
+	}
+	const port = Number(match[3] ?? '22');
+	if (port < 1 || port > 65535) {
+		return undefined;
+	}
+	return { username: match[1], host: match[2], port };
 }
 
 async function promptForProfile(): Promise<ConnectionProfile | undefined> {
@@ -183,9 +258,11 @@ async function disconnectFromVps(provider: SftpFileSystemProvider): Promise<void
 async function forgetConnection(
 	context: vscode.ExtensionContext,
 	provider: SftpFileSystemProvider,
+	connections: ConnectionTreeProvider,
+	profile?: ConnectionProfile,
 ): Promise<void> {
 	const profiles = getProfiles(context);
-	const selected = await vscode.window.showQuickPick(
+	const selected = profile ? { profile } : await vscode.window.showQuickPick(
 		profiles.map((profile) => ({ label: profile.name, description: `${profile.username}@${profile.host}`, profile })),
 		{ placeHolder: 'Forget which saved connection?' },
 	);
@@ -195,12 +272,131 @@ async function forgetConnection(
 	provider.disconnect(selected.profile.id);
 	await context.secrets.delete(secretKey(selected.profile.id));
 	await context.globalState.update(PROFILES_KEY, profiles.filter((item) => item.id !== selected.profile.id));
+	connections.refresh();
 	for (const folder of remoteWorkspaceFolders().filter((item) => item.uri.authority === selected.profile.id)) {
 		const index = vscode.workspace.workspaceFolders?.indexOf(folder);
 		if (index !== undefined && index >= 0) {
 			vscode.workspace.updateWorkspaceFolders(index, 1);
 		}
 	}
+}
+
+class ConnectionItem extends vscode.TreeItem {
+	constructor(readonly profile: ConnectionProfile, connected: boolean) {
+		super(profile.name, vscode.TreeItemCollapsibleState.Collapsed);
+		this.description = `${profile.username}@${profile.host}${profile.port === 22 ? '' : `:${profile.port}`}`;
+		this.tooltip = `${this.description}${profile.remotePath}`;
+		this.contextValue = connected ? 'easyVpsConnected' : 'easyVpsDisconnected';
+		this.iconPath = new vscode.ThemeIcon(connected ? 'vm-active' : 'remote');
+	}
+}
+
+class RemotePathItem extends vscode.TreeItem {
+	constructor(readonly profile: ConnectionProfile, readonly remotePath: string) {
+		super(remotePath, vscode.TreeItemCollapsibleState.None);
+		this.description = remotePath === profile.remotePath ? 'default' : undefined;
+		this.tooltip = `Open ${remotePath} on ${profile.name}`;
+		this.contextValue = 'easyVpsRemotePath';
+		this.iconPath = new vscode.ThemeIcon(remotePath === profile.remotePath ? 'folder-active' : 'folder');
+		this.command = { command: 'easy-vps.openPath', title: 'Open Remote Path', arguments: [this] };
+	}
+}
+
+type ConnectionTreeItem = ConnectionItem | RemotePathItem;
+
+class ConnectionTreeProvider implements vscode.TreeDataProvider<ConnectionTreeItem> {
+	private readonly emitter = new vscode.EventEmitter<ConnectionTreeItem | undefined>();
+	readonly onDidChangeTreeData = this.emitter.event;
+	constructor(private readonly context: vscode.ExtensionContext, private readonly provider: SftpFileSystemProvider) {}
+	getTreeItem(item: ConnectionTreeItem): vscode.TreeItem { return item; }
+	getChildren(item?: ConnectionTreeItem): ConnectionTreeItem[] {
+		if (item instanceof ConnectionItem) {
+			return [...new Set([item.profile.remotePath, ...COMMON_REMOTE_PATHS])]
+				.map((remotePath) => new RemotePathItem(item.profile, remotePath));
+		}
+		if (item) { return []; }
+		return getProfiles(this.context).map((profile) => new ConnectionItem(profile, this.provider.isConnected(profile.id)));
+	}
+	refresh(): void { this.emitter.fire(undefined); }
+}
+
+async function openRemotePath(
+	context: vscode.ExtensionContext,
+	provider: SftpFileSystemProvider,
+	connections: ConnectionTreeProvider,
+	profile: ConnectionProfile,
+	remotePath: string,
+): Promise<void> {
+	const updated = { ...profile, remotePath };
+	await connectProfile(context, provider, updated, connections);
+}
+
+async function testConnection(context: vscode.ExtensionContext, provider: SftpFileSystemProvider, profile: ConnectionProfile): Promise<void> {
+	let password = profile.authType === 'password' ? await context.secrets.get(secretKey(profile.id)) : undefined;
+	if (profile.authType === 'password' && !password) {
+		password = await vscode.window.showInputBox({ prompt: `Password for ${profile.username}@${profile.host}`, password: true });
+	}
+	if (profile.authType === 'password' && password === undefined) { return; }
+	try {
+		await provider.connect(profile, password);
+		vscode.window.showInformationMessage(`Connection to ${profile.name} succeeded.`);
+	} catch (error) {
+		vscode.window.showErrorMessage(`Connection test failed: ${errorMessage(error)}`);
+	}
+}
+
+async function editConnection(context: vscode.ExtensionContext, provider: SftpFileSystemProvider, connections: ConnectionTreeProvider, profile: ConnectionProfile): Promise<void> {
+	const remotePath = await ask('Remote folder', 'Example: /var/www', profile.remotePath);
+	if (!remotePath?.startsWith('/')) { return; }
+	const name = await ask('Connection name', 'Shown in Easy VPS and Explorer', profile.name);
+	if (!name) { return; }
+	profile.name = name;
+	profile.remotePath = path.posix.normalize(remotePath);
+	provider.disconnect(profile.id);
+	await saveProfile(context, profile);
+	connections.refresh();
+	vscode.window.showInformationMessage(`${profile.name} was updated.`);
+}
+
+async function importSshConfig(context: vscode.ExtensionContext, connections: ConnectionTreeProvider): Promise<void> {
+	let text: string;
+	try {
+		text = Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.file(expandHome('~/.ssh/config')))).toString('utf8');
+	} catch {
+		vscode.window.showInformationMessage('No ~/.ssh/config file was found.'); return;
+	}
+	const selected = await vscode.window.showQuickPick(
+		parseSshConfig(text).map((profile) => ({ label: profile.name, description: `${profile.username}@${profile.host}`, profile })),
+		{ placeHolder: 'Choose SSH hosts to import', canPickMany: true },
+	);
+	if (!selected?.length) { return; }
+	for (const item of selected) { await saveProfile(context, item.profile); }
+	connections.refresh();
+	vscode.window.showInformationMessage(`Imported ${selected.length} SSH connection${selected.length === 1 ? '' : 's'}.`);
+}
+
+function parseSshConfig(text: string): ConnectionProfile[] {
+	const profiles: ConnectionProfile[] = [];
+	let current: Partial<ConnectionProfile> | undefined;
+	const finish = () => {
+		if (current?.name && current.host && current.username) {
+			profiles.push({ id: `ssh-${slug(current.name)}`, name: current.name, host: current.host, port: current.port ?? 22,
+				username: current.username, remotePath: '/', authType: current.privateKeyPath ? 'privateKey' : 'password', privateKeyPath: current.privateKeyPath });
+		}
+	};
+	for (const rawLine of text.split(/\r?\n/)) {
+		const [key, ...rest] = rawLine.trim().split(/\s+/); const value = rest.join(' ');
+		if (key?.toLowerCase() === 'host' && value && !value.includes('*')) { finish(); current = { name: value, host: value }; }
+		else if (current && value) {
+			switch (key?.toLowerCase()) {
+				case 'hostname': current.host = value; break;
+				case 'user': current.username = value; break;
+				case 'port': current.port = Number(value); break;
+				case 'identityfile': current.privateKeyPath = value; break;
+			}
+		}
+	}
+	finish(); return profiles;
 }
 
 class SftpFileSystemProvider implements vscode.FileSystemProvider, vscode.Disposable {
@@ -210,6 +406,7 @@ class SftpFileSystemProvider implements vscode.FileSystemProvider, vscode.Dispos
 	readonly onDidChangeFile = this.changeEmitter.event;
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
+	isConnected(authority: string): boolean { return this.connections.has(authority); }
 
 	watch(): vscode.Disposable {
 		// SFTP has no standard file-change notification protocol. Explorer refreshes after operations.

@@ -4,11 +4,16 @@ Browse and edit files on a VPS directly in the VS Code Explorer over SSH/SFTP.
 
 ## Features
 
+- Two-step setup: enter `user@host`, then your password.
+- Dedicated Easy VPS sidebar with saved connections and one-click opening.
+- One-click shortcuts to common server paths such as `/root`, `/home`, `/var/www`, `/etc`, `/opt`, and `/srv`.
 - Connect using an SSH private key or password.
 - Open a remote folder in the standard VS Code Explorer.
 - Read, edit, create, rename, copy, move, and delete remote files and folders.
 - Reuse saved connection profiles.
 - Store passwords in VS Code Secret Storage, never in settings or profile data.
+- Import connection profiles from `~/.ssh/config`.
+- Test, edit, refresh, and forget saved connections from the sidebar.
 
 ## Run the extension
 
@@ -18,7 +23,7 @@ Browse and edit files on a VPS directly in the VS Code Explorer over SSH/SFTP.
 4. In the new window, click the remote icon in the Explorer toolbar or run **Easy VPS: Connect to VPS** from the Command Palette.
 5. Enter the host, SSH port, username, remote folder, and authentication method.
 
-The selected remote folder appears in Explorer as a workspace folder.
+The selected remote folder appears in Explorer as a workspace folder. For the fastest setup, click the Easy VPS server icon in the Activity Bar, click **Add VPS**, enter `user@host`, and then enter the password. Port `22` and remote path `/` are automatic. Use **Add VPS (Advanced)** for custom ports, folders, or SSH keys.
 
 ## Security
 
