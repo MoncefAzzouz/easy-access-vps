@@ -1,5 +1,10 @@
 # Change Log
 
+## 0.2.4
+
+- Enforced one Explorer entry per unique SSH server and user.
+- Re-adding the same VPS now reuses its saved profile while different VPS servers remain separate.
+
 ## 0.2.3
 
 - Restored `/` as a permanent quick path.

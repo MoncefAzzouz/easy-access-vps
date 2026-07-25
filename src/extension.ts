@@ -118,6 +118,10 @@ async function connectProfile(
 	profile: ConnectionProfile,
 	connections?: ConnectionTreeProvider,
 ): Promise<void> {
+	const savedMatch = getProfiles(context).find((saved) => sameServer(saved, profile));
+	if (savedMatch && savedMatch.id !== profile.id) {
+		profile.id = savedMatch.id;
+	}
 	let secret: string | undefined;
 	if (profile.authType === 'password') {
 		secret = await context.secrets.get(secretKey(profile.id));
@@ -149,9 +153,14 @@ async function connectProfile(
 				await context.globalState.update(LAST_PATH_KEY, profile.remotePath);
 				connections?.refresh();
 				const uri = vscode.Uri.from({ scheme: SCHEME, authority: profile.id, path: profile.remotePath });
+				const profiles = getProfiles(context);
 				const matchingIndexes = (vscode.workspace.workspaceFolders ?? [])
 					.map((folder, index) => ({ folder, index }))
-					.filter(({ folder }) => folder.uri.scheme === SCHEME && folder.uri.authority === profile.id)
+					.filter(({ folder }) => {
+						if (folder.uri.scheme !== SCHEME) { return false; }
+						const folderProfile = profiles.find((saved) => saved.id === folder.uri.authority);
+						return folder.uri.authority === profile.id || Boolean(folderProfile && sameServer(folderProfile, profile));
+					})
 					.map(({ index }) => index);
 				if (matchingIndexes.length === 0) {
 					vscode.workspace.updateWorkspaceFolders(
@@ -721,13 +730,21 @@ function getProfiles(context: vscode.ExtensionContext): ConnectionProfile[] {
 
 async function saveProfile(context: vscode.ExtensionContext, profile: ConnectionProfile): Promise<void> {
 	const profiles = getProfiles(context);
-	const index = profiles.findIndex((item) => item.id === profile.id);
+	const index = profiles.findIndex((item) => item.id === profile.id || sameServer(item, profile));
 	if (index >= 0) {
+		profile.id = profiles[index].id;
 		profiles[index] = profile;
 	} else {
 		profiles.push(profile);
 	}
-	await context.globalState.update(PROFILES_KEY, profiles);
+	await context.globalState.update(PROFILES_KEY, profiles.filter((item, itemIndex) =>
+		itemIndex === profiles.findIndex((candidate) => sameServer(candidate, item))));
+}
+
+function sameServer(left: ConnectionProfile, right: ConnectionProfile): boolean {
+	return left.host.toLowerCase() === right.host.toLowerCase()
+		&& left.port === right.port
+		&& left.username === right.username;
 }
 
 function remoteWorkspaceFolders(): readonly vscode.WorkspaceFolder[] {
