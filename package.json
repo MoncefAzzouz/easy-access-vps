@@ -1,0 +1,102 @@
+{
+  "name": "easy-vps",
+  "displayName": "Easy VPS",
+  "description": "Browse and edit VPS files in VS Code Explorer over SSH/SFTP.",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.107.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ssh",
+    "sftp",
+    "vps",
+    "remote",
+    "filesystem"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onCommand:easy-vps.connect",
+    "onCommand:easy-vps.disconnect",
+    "onCommand:easy-vps.forgetConnection",
+    "onFileSystem:easy-vps"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "easy-vps.connect",
+        "title": "Connect to VPS",
+        "category": "Easy VPS",
+        "icon": "$(remote)"
+      },
+      {
+        "command": "easy-vps.disconnect",
+        "title": "Disconnect VPS",
+        "category": "Easy VPS"
+      },
+      {
+        "command": "easy-vps.forgetConnection",
+        "title": "Forget Saved Connection",
+        "category": "Easy VPS"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "easy-vps.connect",
+          "when": "view == workbench.explorer.fileView",
+          "group": "navigation@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "easy-vps.connect"
+        },
+        {
+          "command": "easy-vps.disconnect",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "easy-vps.forgetConnection"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "24.x",
+    "@types/ssh2": "^1.15.5",
+    "@types/vscode": "^1.107.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.5.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1"
+  },
+  "dependencies": {
+    "ssh2": "^1.17.0"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6"
+  }
+}
