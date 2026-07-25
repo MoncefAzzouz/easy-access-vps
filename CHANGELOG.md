@@ -1,5 +1,10 @@
 # Change Log
 
+## 0.2.3
+
+- Restored `/` as a permanent quick path.
+- Added a `..` shortcut that navigates to the parent VPS directory.
+
 ## 0.2.2
 
 - Added **Remove VPS from Explorer** without deleting the saved connection.

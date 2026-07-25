@@ -6,7 +6,7 @@ const SCHEME = 'easy-vps';
 const PROFILES_KEY = 'easy-vps.profiles';
 const LAST_PATH_KEY = 'easy-vps.lastRemotePath';
 type AuthType = 'password' | 'privateKey';
-const COMMON_REMOTE_PATHS = ['/root', '/home', '/var/www', '/etc', '/opt', '/srv', '/tmp'];
+const COMMON_REMOTE_PATHS = ['/', '/root', '/home', '/var/www', '/etc', '/opt', '/srv', '/tmp'];
 
 interface ConnectionProfile {
 	id: string;
@@ -330,9 +330,9 @@ class ConnectionItem extends vscode.TreeItem {
 }
 
 class RemotePathItem extends vscode.TreeItem {
-	constructor(readonly profile: ConnectionProfile, readonly remotePath: string) {
-		super(remotePath, vscode.TreeItemCollapsibleState.None);
-		this.description = remotePath === profile.remotePath ? 'default' : undefined;
+	constructor(readonly profile: ConnectionProfile, readonly remotePath: string, label = remotePath) {
+		super(label, vscode.TreeItemCollapsibleState.None);
+		this.description = label === '..' ? remotePath : remotePath === profile.remotePath ? 'current' : undefined;
 		this.tooltip = `Open ${remotePath} on ${profile.name}`;
 		this.contextValue = 'easyVpsRemotePath';
 		this.iconPath = new vscode.ThemeIcon(remotePath === profile.remotePath ? 'folder-active' : 'folder');
@@ -349,8 +349,13 @@ class ConnectionTreeProvider implements vscode.TreeDataProvider<ConnectionTreeIt
 	getTreeItem(item: ConnectionTreeItem): vscode.TreeItem { return item; }
 	getChildren(item?: ConnectionTreeItem): ConnectionTreeItem[] {
 		if (item instanceof ConnectionItem) {
-			return [...new Set([item.profile.remotePath, ...COMMON_REMOTE_PATHS])]
-				.map((remotePath) => new RemotePathItem(item.profile, remotePath));
+			const items: RemotePathItem[] = [];
+			if (item.profile.remotePath !== '/') {
+				items.push(new RemotePathItem(item.profile, path.posix.dirname(item.profile.remotePath), '..'));
+			}
+			items.push(...[...new Set([item.profile.remotePath, ...COMMON_REMOTE_PATHS])]
+				.map((remotePath) => new RemotePathItem(item.profile, remotePath)));
+			return items;
 		}
 		if (item) { return []; }
 		return getProfiles(this.context).map((profile) => new ConnectionItem(profile, this.provider.isConnected(profile.id)));
