@@ -2,7 +2,7 @@
   "name": "easy-vps",
   "displayName": "Easy VPS",
   "description": "Browse and edit VPS files in VS Code Explorer over SSH/SFTP.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "engines": {
     "vscode": "^1.107.0"
   },
@@ -20,6 +20,7 @@
   "activationEvents": [
     "onView:easyVps.connections",
     "onCommand:easy-vps.add",
+    "onCommand:easy-vps.removeFromExplorer",
     "onCommand:easy-vps.connect",
     "onCommand:easy-vps.disconnect",
     "onCommand:easy-vps.forgetConnection",
@@ -104,6 +105,12 @@
         "title": "Refresh Connections",
         "category": "Easy VPS",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "easy-vps.removeFromExplorer",
+        "title": "Remove VPS from Explorer",
+        "category": "Easy VPS",
+        "icon": "$(close)"
       }
     ],
     "menus": {
@@ -144,6 +151,13 @@
           "command": "easy-vps.forgetConnection",
           "when": "view == easyVps.connections",
           "group": "easyVps@3"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "easy-vps.removeFromExplorer",
+          "when": "resourceScheme == easy-vps",
+          "group": "easyVps@100"
         }
       ],
       "commandPalette": [

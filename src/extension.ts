@@ -51,11 +51,39 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('easy-vps.importSshConfig', () =>
 			importSshConfig(context, connections)),
 		vscode.commands.registerCommand('easy-vps.refresh', () => connections.refresh()),
+		vscode.commands.registerCommand('easy-vps.removeFromExplorer', (uri?: vscode.Uri) =>
+			removeFromExplorer(provider, connections, uri)),
 		vscode.commands.registerCommand('easy-vps.disconnect', () => disconnectFromVps(provider)),
 		vscode.commands.registerCommand('easy-vps.forgetConnection', (item?: ConnectionItem) =>
 			forgetConnection(context, provider, connections, item?.profile)),
 		provider,
 	);
+}
+
+async function removeFromExplorer(
+	provider: SftpFileSystemProvider,
+	connections: ConnectionTreeProvider,
+	uri?: vscode.Uri,
+): Promise<void> {
+	const folder = uri
+		? vscode.workspace.getWorkspaceFolder(uri)
+		: await chooseRemoteWorkspaceFolder('Remove which VPS from Explorer?');
+	if (!folder || folder.uri.scheme !== SCHEME) { return; }
+	const index = vscode.workspace.workspaceFolders?.indexOf(folder) ?? -1;
+	if (index >= 0) {
+		provider.disconnect(folder.uri.authority);
+		vscode.workspace.updateWorkspaceFolders(index, 1);
+		connections.refresh();
+		vscode.window.showInformationMessage(`${folder.name} was removed from Explorer. Its saved connection is still available.`);
+	}
+}
+
+async function chooseRemoteWorkspaceFolder(placeHolder: string): Promise<vscode.WorkspaceFolder | undefined> {
+	const selected = await vscode.window.showQuickPick(
+		remoteWorkspaceFolders().map((folder) => ({ label: folder.name, description: folder.uri.path, folder })),
+		{ placeHolder },
+	);
+	return selected?.folder;
 }
 
 async function connectToVps(

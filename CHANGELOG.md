@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.2.2
+
+- Added **Remove VPS from Explorer** without deleting the saved connection.
+
 ## 0.2.1
 
 - Common-path shortcuts now reuse the existing Explorer entry instead of adding duplicate VPS folders.
