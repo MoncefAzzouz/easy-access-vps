@@ -152,7 +152,8 @@ async function connectProfile(
 				await saveProfile(context, profile);
 				await context.globalState.update(LAST_PATH_KEY, profile.remotePath);
 				connections?.refresh();
-				const uri = vscode.Uri.from({ scheme: SCHEME, authority: profile.id, path: profile.remotePath });
+				const workspaceUri = vscode.Uri.from({ scheme: SCHEME, authority: profile.id, path: '/' });
+				const targetUri = vscode.Uri.from({ scheme: SCHEME, authority: profile.id, path: profile.remotePath });
 				const profiles = getProfiles(context);
 				const matchingIndexes = (vscode.workspace.workspaceFolders ?? [])
 					.map((folder, index) => ({ folder, index }))
@@ -166,16 +167,20 @@ async function connectProfile(
 					vscode.workspace.updateWorkspaceFolders(
 						vscode.workspace.workspaceFolders?.length ?? 0,
 						0,
-						{ uri, name: profile.name },
+						{ uri: workspaceUri, name: profile.name },
 					);
 				} else {
-					// Keep one Explorer entry per server. Remove old duplicate paths, then
-					// replace the remaining entry with the selected remote directory.
+					// Keep one stable root entry per server so navigating remote paths does
+					// not rebuild Explorer or disturb collapsed local workspace folders.
 					for (const index of matchingIndexes.slice(1).reverse()) {
 						vscode.workspace.updateWorkspaceFolders(index, 1);
 					}
-					vscode.workspace.updateWorkspaceFolders(matchingIndexes[0], 1, { uri, name: profile.name });
+					const existing = vscode.workspace.workspaceFolders?.[matchingIndexes[0]];
+					if (existing?.uri.toString() !== workspaceUri.toString() || existing.name !== profile.name) {
+						vscode.workspace.updateWorkspaceFolders(matchingIndexes[0], 1, { uri: workspaceUri, name: profile.name });
+					}
 				}
+				await vscode.commands.executeCommand('revealInExplorer', targetUri);
 				vscode.window.showInformationMessage(`${profile.name} is available in Explorer.`);
 			} catch (error) {
 				provider.disconnect(profile.id);

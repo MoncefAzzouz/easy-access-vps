@@ -1,5 +1,10 @@
 # Change Log
 
+## 0.2.5
+
+- Remote-path shortcuts now reveal folders inside a stable VPS root instead of rebuilding the workspace.
+- Preserved the collapsed state of local Explorer folders during VPS navigation.
+
 ## 0.2.4
 
 - Enforced one Explorer entry per unique SSH server and user.
