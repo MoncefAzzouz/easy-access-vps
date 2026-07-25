@@ -121,13 +121,23 @@ async function connectProfile(
 				await context.globalState.update(LAST_PATH_KEY, profile.remotePath);
 				connections?.refresh();
 				const uri = vscode.Uri.from({ scheme: SCHEME, authority: profile.id, path: profile.remotePath });
-				const existing = vscode.workspace.workspaceFolders?.find((folder) => folder.uri.toString() === uri.toString());
-				if (!existing) {
+				const matchingIndexes = (vscode.workspace.workspaceFolders ?? [])
+					.map((folder, index) => ({ folder, index }))
+					.filter(({ folder }) => folder.uri.scheme === SCHEME && folder.uri.authority === profile.id)
+					.map(({ index }) => index);
+				if (matchingIndexes.length === 0) {
 					vscode.workspace.updateWorkspaceFolders(
 						vscode.workspace.workspaceFolders?.length ?? 0,
 						0,
 						{ uri, name: profile.name },
 					);
+				} else {
+					// Keep one Explorer entry per server. Remove old duplicate paths, then
+					// replace the remaining entry with the selected remote directory.
+					for (const index of matchingIndexes.slice(1).reverse()) {
+						vscode.workspace.updateWorkspaceFolders(index, 1);
+					}
+					vscode.workspace.updateWorkspaceFolders(matchingIndexes[0], 1, { uri, name: profile.name });
 				}
 				vscode.window.showInformationMessage(`${profile.name} is available in Explorer.`);
 			} catch (error) {

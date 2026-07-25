@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.2.1
+
+- Common-path shortcuts now reuse the existing Explorer entry instead of adding duplicate VPS folders.
+
 ## 0.2.0
 
 - Added an Easy VPS Activity Bar sidebar with saved connections.
