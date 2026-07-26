@@ -3,7 +3,7 @@
   "publisher": "moncefazzouz",
   "displayName": "Easy VPS",
   "description": "Browse and edit VPS files in VS Code Explorer over SSH/SFTP.",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "icon": "resources/icon.png",
   "repository": {
     "type": "git",

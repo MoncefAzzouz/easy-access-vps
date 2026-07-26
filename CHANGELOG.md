@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.2.6
+
+- Reworked Marketplace documentation with installation, quick-start, sidebar, security, command, and troubleshooting details.
+
 ## 0.2.5
 
 - Remote-path shortcuts now reveal folders inside a stable VPS root instead of rebuilding the workspace.
