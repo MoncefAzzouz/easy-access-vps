@@ -1,5 +1,6 @@
 {
   "name": "easy-vps",
+  "publisher": "moncefazzouz",
   "displayName": "Easy VPS",
   "description": "Browse and edit VPS files in VS Code Explorer over SSH/SFTP.",
   "version": "0.2.5",
