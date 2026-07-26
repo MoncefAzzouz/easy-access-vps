@@ -1,5 +1,7 @@
 # Easy VPS
 
+![Easy VPS icon](resources/icon.png)
+
 Browse and edit files on a VPS directly in the VS Code Explorer over SSH/SFTP.
 
 ## Features
