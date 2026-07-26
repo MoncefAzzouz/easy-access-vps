@@ -86,3 +86,7 @@ Run **Easy VPS: Import from SSH Config** to import compatible hosts from `~/.ssh
 ## Issues and source code
 
 Report problems or contribute at [github.com/MoncefAzzouz/easy-access-vps](https://github.com/MoncefAzzouz/easy-access-vps).
+
+## License
+
+[MIT](LICENSE) © 2026 Moncef Azzouz

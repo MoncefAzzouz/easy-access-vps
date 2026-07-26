@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.2.7
+
+- Added the MIT License required for Open VSX distribution.
+
 ## 0.2.6
 
 - Reworked Marketplace documentation with installation, quick-start, sidebar, security, command, and troubleshooting details.
