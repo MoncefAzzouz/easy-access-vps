@@ -1,5 +1,14 @@
 # Change Log
 
+## 0.4.0
+
+- Added first-use SSH host fingerprint verification and remembered trusted host keys.
+- Added remote filename and folder search with cancellation and a 200-result safety limit.
+- Added recursive upload and download actions with progress and cancellation.
+- Added Unix permission editing from the Explorer context menu.
+- Added save-conflict protection when a remote file changes after it was opened.
+- Improved symlinked-directory browsing while avoiding recursive symlink loops during search.
+
 ## 0.3.0
 
 - Added interactive SSH terminals inside the IDE Terminal panel.

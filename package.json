@@ -3,7 +3,7 @@
   "publisher": "moncefazzouz",
   "displayName": "Easy VPS",
   "description": "Browse and edit VPS files in VS Code Explorer over SSH/SFTP.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "MIT",
   "icon": "resources/icon.png",
   "repository": {
@@ -37,6 +37,10 @@
     "onCommand:easy-vps.add",
     "onCommand:easy-vps.removeFromExplorer",
     "onCommand:easy-vps.openTerminal",
+    "onCommand:easy-vps.searchRemote",
+    "onCommand:easy-vps.upload",
+    "onCommand:easy-vps.download",
+    "onCommand:easy-vps.permissions",
     "onCommand:easy-vps.connect",
     "onCommand:easy-vps.disconnect",
     "onCommand:easy-vps.forgetConnection",
@@ -133,6 +137,30 @@
         "title": "Open VPS Terminal Here",
         "category": "Easy VPS",
         "icon": "$(terminal)"
+      },
+      {
+        "command": "easy-vps.searchRemote",
+        "title": "Search Remote Files",
+        "category": "Easy VPS",
+        "icon": "$(search)"
+      },
+      {
+        "command": "easy-vps.upload",
+        "title": "Upload to VPS",
+        "category": "Easy VPS",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "easy-vps.download",
+        "title": "Download from VPS",
+        "category": "Easy VPS",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "easy-vps.permissions",
+        "title": "Change Remote Permissions",
+        "category": "Easy VPS",
+        "icon": "$(lock)"
       }
     ],
     "menus": {
@@ -185,6 +213,26 @@
           "command": "easy-vps.openTerminal",
           "when": "resourceScheme == easy-vps",
           "group": "easyVps@1"
+        },
+        {
+          "command": "easy-vps.searchRemote",
+          "when": "resourceScheme == easy-vps",
+          "group": "easyVps@2"
+        },
+        {
+          "command": "easy-vps.upload",
+          "when": "resourceScheme == easy-vps",
+          "group": "easyVps@3"
+        },
+        {
+          "command": "easy-vps.download",
+          "when": "resourceScheme == easy-vps",
+          "group": "easyVps@4"
+        },
+        {
+          "command": "easy-vps.permissions",
+          "when": "resourceScheme == easy-vps",
+          "group": "easyVps@5"
         },
         {
           "command": "easy-vps.removeFromExplorer",

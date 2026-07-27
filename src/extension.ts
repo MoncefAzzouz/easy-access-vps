@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 const SCHEME = 'easy-vps';
 const PROFILES_KEY = 'easy-vps.profiles';
 const LAST_PATH_KEY = 'easy-vps.lastRemotePath';
+const HOST_KEYS_KEY = 'easy-vps.hostKeys';
 type AuthType = 'password' | 'privateKey';
 const COMMON_REMOTE_PATHS = ['/', '/root', '/home', '/var/www', '/etc', '/opt', '/srv', '/tmp'];
 
@@ -55,11 +56,136 @@ export function activate(context: vscode.ExtensionContext): void {
 			removeFromExplorer(provider, connections, uri)),
 		vscode.commands.registerCommand('easy-vps.openTerminal', (target?: vscode.Uri | ConnectionTreeItem) =>
 			openVpsTerminal(context, target)),
+		vscode.commands.registerCommand('easy-vps.searchRemote', (uri?: vscode.Uri) =>
+			searchRemoteFiles(provider, uri)),
+		vscode.commands.registerCommand('easy-vps.upload', (uri?: vscode.Uri) =>
+			uploadToVps(provider, uri)),
+		vscode.commands.registerCommand('easy-vps.download', (uri?: vscode.Uri) =>
+			downloadFromVps(uri)),
+		vscode.commands.registerCommand('easy-vps.permissions', (uri?: vscode.Uri) =>
+			changeRemotePermissions(provider, uri)),
 		vscode.commands.registerCommand('easy-vps.disconnect', () => disconnectFromVps(provider)),
 		vscode.commands.registerCommand('easy-vps.forgetConnection', (item?: ConnectionItem) =>
 			forgetConnection(context, provider, connections, item?.profile)),
 		provider,
 	);
+}
+
+async function searchRemoteFiles(provider: SftpFileSystemProvider, uri?: vscode.Uri): Promise<void> {
+	const root = await remoteTarget(uri, true);
+	if (!root) { return; }
+	const query = await vscode.window.showInputBox({
+		prompt: `Search file and folder names below ${root.path}`,
+		placeHolder: 'Name to find',
+		ignoreFocusOut: true,
+	});
+	if (!query?.trim()) { return; }
+	const matches = await vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: `Searching ${root.path}…`,
+		cancellable: true,
+	}, (_progress, token) => provider.search(root, query.trim(), token));
+	if (matches.length === 0) {
+		vscode.window.showInformationMessage(`No remote items matched “${query}”.`);
+		return;
+	}
+	const selected = await vscode.window.showQuickPick(matches.map((match) => ({
+		label: `$(file) ${path.posix.basename(match.path)}`,
+		description: match.path,
+		uri: match,
+	})), { placeHolder: `${matches.length} result${matches.length === 1 ? '' : 's'}` });
+	if (!selected) { return; }
+	const stat = await vscode.workspace.fs.stat(selected.uri);
+	if ((stat.type & vscode.FileType.Directory) !== 0) {
+		await vscode.commands.executeCommand('revealInExplorer', selected.uri);
+	} else {
+		await vscode.window.showTextDocument(selected.uri);
+	}
+}
+
+async function uploadToVps(_provider: SftpFileSystemProvider, uri?: vscode.Uri): Promise<void> {
+	const target = await remoteTarget(uri, true);
+	if (!target) { return; }
+	const sources = await vscode.window.showOpenDialog({
+		canSelectFiles: true,
+		canSelectFolders: true,
+		canSelectMany: true,
+		openLabel: 'Upload to VPS',
+	});
+	if (!sources?.length) { return; }
+	await vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: `Uploading ${sources.length} item${sources.length === 1 ? '' : 's'}…`,
+		cancellable: true,
+	}, async (progress, token) => {
+		for (let index = 0; index < sources.length; index += 1) {
+			if (token.isCancellationRequested) { break; }
+			progress.report({ message: path.basename(sources[index].fsPath), increment: 100 / sources.length });
+			await copyAcrossFileSystems(sources[index], vscode.Uri.joinPath(target, path.basename(sources[index].fsPath)), token);
+		}
+	});
+}
+
+async function downloadFromVps(uri?: vscode.Uri): Promise<void> {
+	const source = await remoteTarget(uri, false);
+	if (!source) { return; }
+	const destinations = await vscode.window.showOpenDialog({
+		canSelectFiles: false,
+		canSelectFolders: true,
+		canSelectMany: false,
+		openLabel: 'Download here',
+	});
+	if (!destinations?.[0]) { return; }
+	const destination = vscode.Uri.joinPath(destinations[0], path.posix.basename(source.path) || source.authority);
+	await vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: `Downloading ${path.posix.basename(source.path)}…`,
+		cancellable: true,
+	}, (_progress, token) => copyAcrossFileSystems(source, destination, token));
+}
+
+async function copyAcrossFileSystems(source: vscode.Uri, destination: vscode.Uri, token: vscode.CancellationToken): Promise<void> {
+	if (token.isCancellationRequested) { return; }
+	const stat = await vscode.workspace.fs.stat(source);
+	if ((stat.type & vscode.FileType.Directory) !== 0) {
+		await vscode.workspace.fs.createDirectory(destination);
+		for (const [name] of await vscode.workspace.fs.readDirectory(source)) {
+			await copyAcrossFileSystems(vscode.Uri.joinPath(source, name), vscode.Uri.joinPath(destination, name), token);
+			if (token.isCancellationRequested) { return; }
+		}
+	} else {
+		await vscode.workspace.fs.writeFile(destination, await vscode.workspace.fs.readFile(source));
+	}
+}
+
+async function changeRemotePermissions(provider: SftpFileSystemProvider, uri?: vscode.Uri): Promise<void> {
+	const target = await remoteTarget(uri, false);
+	if (!target) { return; }
+	const current = await provider.mode(target);
+	const value = await vscode.window.showInputBox({
+		prompt: `Unix permissions for ${path.posix.basename(target.path) || target.path}`,
+		value: (current & 0o7777).toString(8).padStart(3, '0'),
+		placeHolder: '755',
+		validateInput: (input) => /^[0-7]{3,4}$/.test(input) ? undefined : 'Enter 3 or 4 octal digits, for example 755.',
+	});
+	if (!value) { return; }
+	await provider.chmod(target, Number.parseInt(value, 8));
+	vscode.window.showInformationMessage(`Permissions changed to ${value}.`);
+}
+
+async function remoteTarget(uri: vscode.Uri | undefined, requireDirectory: boolean): Promise<vscode.Uri | undefined> {
+	let target = uri?.scheme === SCHEME ? uri : vscode.window.activeTextEditor?.document.uri;
+	if (target?.scheme !== SCHEME) {
+		target = (await chooseRemoteWorkspaceFolder('Choose a VPS'))?.uri;
+	}
+	if (!target) { return undefined; }
+	if (requireDirectory) {
+		const stat = await vscode.workspace.fs.stat(target);
+		if ((stat.type & vscode.FileType.Directory) === 0) {
+			target = vscode.Uri.joinPath(target, '..');
+		}
+	}
+	return target;
 }
 
 async function openVpsTerminal(
@@ -106,7 +232,7 @@ async function openVpsTerminal(
 	}
 
 	try {
-		const config = await createConnectConfig(profile, password);
+		const config = await createConnectConfig(context, profile, password);
 		const terminal = vscode.window.createTerminal({
 			name: `${profile.name}: ${remoteDirectory}`,
 			pty: new SshPseudoterminal(config, remoteDirectory),
@@ -127,7 +253,7 @@ class SshPseudoterminal implements vscode.Pseudoterminal {
 	private channel?: ClientChannel;
 	private closed = false;
 
-	constructor(private readonly config: ConnectConfig, private readonly cwd: string) {}
+	constructor(private readonly config: ConnectConfig, private readonly cwd: string) { }
 
 	open(dimensions?: vscode.TerminalDimensions): void {
 		this.writeEmitter.fire(`\x1b[36mConnecting to ${this.config.username}@${this.config.host}…\x1b[0m\r\n`);
@@ -477,7 +603,7 @@ type ConnectionTreeItem = ConnectionItem | RemotePathItem;
 class ConnectionTreeProvider implements vscode.TreeDataProvider<ConnectionTreeItem> {
 	private readonly emitter = new vscode.EventEmitter<ConnectionTreeItem | undefined>();
 	readonly onDidChangeTreeData = this.emitter.event;
-	constructor(private readonly context: vscode.ExtensionContext, private readonly provider: SftpFileSystemProvider) {}
+	constructor(private readonly context: vscode.ExtensionContext, private readonly provider: SftpFileSystemProvider) { }
 	getTreeItem(item: ConnectionTreeItem): vscode.TreeItem { return item; }
 	getChildren(item?: ConnectionTreeItem): ConnectionTreeItem[] {
 		if (item instanceof ConnectionItem) {
@@ -555,8 +681,10 @@ function parseSshConfig(text: string): ConnectionProfile[] {
 	let current: Partial<ConnectionProfile> | undefined;
 	const finish = () => {
 		if (current?.name && current.host && current.username) {
-			profiles.push({ id: `ssh-${slug(current.name)}`, name: current.name, host: current.host, port: current.port ?? 22,
-				username: current.username, remotePath: '/', authType: current.privateKeyPath ? 'privateKey' : 'password', privateKeyPath: current.privateKeyPath });
+			profiles.push({
+				id: `ssh-${slug(current.name)}`, name: current.name, host: current.host, port: current.port ?? 22,
+				username: current.username, remotePath: '/', authType: current.privateKeyPath ? 'privateKey' : 'password', privateKeyPath: current.privateKeyPath
+			});
 		}
 	};
 	for (const rawLine of text.split(/\r?\n/)) {
@@ -577,10 +705,11 @@ function parseSshConfig(text: string): ConnectionProfile[] {
 class SftpFileSystemProvider implements vscode.FileSystemProvider, vscode.Disposable {
 	private readonly connections = new Map<string, ActiveConnection>();
 	private readonly reconnections = new Map<string, Promise<ActiveConnection>>();
+	private readonly readSnapshots = new Map<string, { mtime: number; size: number }>();
 	private readonly changeEmitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
 	readonly onDidChangeFile = this.changeEmitter.event;
 
-	constructor(private readonly context: vscode.ExtensionContext) {}
+	constructor(private readonly context: vscode.ExtensionContext) { }
 	isConnected(authority: string): boolean { return this.connections.has(authority); }
 
 	watch(): vscode.Disposable {
@@ -590,7 +719,7 @@ class SftpFileSystemProvider implements vscode.FileSystemProvider, vscode.Dispos
 
 	async connect(profile: ConnectionProfile, password?: string): Promise<void> {
 		this.disconnect(profile.id);
-		const config = await createConnectConfig(profile, password);
+		const config = await createConnectConfig(this.context, profile, password);
 		const connection = await openSftp(config);
 		connection.client.on('error', (error) => {
 			this.connections.delete(profile.id);
@@ -613,17 +742,45 @@ class SftpFileSystemProvider implements vscode.FileSystemProvider, vscode.Dispos
 	}
 
 	async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
-		const entries = await sftpCall<Array<{ filename: string; attrs: Stats }>>(await this.sftp(uri), 'readdir', uri.path);
-		return entries
+		const sftp = await this.sftp(uri);
+		const entries = await sftpCall<Array<{ filename: string; attrs: Stats }>>(sftp, 'readdir', uri.path);
+		return Promise.all(entries
 			.filter((entry) => entry.filename !== '.' && entry.filename !== '..')
-			.map((entry) => [entry.filename, toFileType(entry.attrs)]);
+			.map(async (entry): Promise<[string, vscode.FileType]> => {
+				let type = toFileType(entry.attrs);
+				if (type === vscode.FileType.SymbolicLink) {
+					try {
+						const target = await sftpCall<Stats>(sftp, 'stat', path.posix.join(uri.path, entry.filename));
+						type |= toFileType(target);
+					} catch { /* Broken links remain symbolic links. */ }
+				}
+				return [entry.filename, type];
+			}));
 	}
 
 	async readFile(uri: vscode.Uri): Promise<Uint8Array> {
-		return sftpCall<Buffer>(await this.sftp(uri), 'readFile', uri.path);
+		const sftp = await this.sftp(uri);
+		const stats = await sftpCall<Stats>(sftp, 'stat', uri.path);
+		const content = await sftpCall<Buffer>(sftp, 'readFile', uri.path);
+		this.readSnapshots.set(uri.toString(), { mtime: stats.mtime, size: stats.size });
+		return content;
 	}
 
 	async writeFile(uri: vscode.Uri, content: Uint8Array, options: { create: boolean; overwrite: boolean }): Promise<void> {
+		const snapshot = this.readSnapshots.get(uri.toString());
+		if (snapshot && await this.exists(uri)) {
+			const current = await sftpCall<Stats>(await this.sftp(uri), 'stat', uri.path);
+			if (current.mtime !== snapshot.mtime || current.size !== snapshot.size) {
+				const choice = await vscode.window.showWarningMessage(
+					`${path.posix.basename(uri.path)} changed on the VPS after you opened it.`,
+					{ modal: true, detail: 'Overwrite the newer remote version with your editor contents?' },
+					'Overwrite',
+				);
+				if (choice !== 'Overwrite') {
+					throw vscode.FileSystemError.Unavailable('Save cancelled because the remote file changed.');
+				}
+			}
+		}
 		if (!options.create || !options.overwrite) {
 			const exists = await this.exists(uri);
 			if (!options.create && !exists) {
@@ -634,12 +791,49 @@ class SftpFileSystemProvider implements vscode.FileSystemProvider, vscode.Dispos
 			}
 		}
 		await sftpCall<void>(await this.sftp(uri), 'writeFile', uri.path, Buffer.from(content));
+		const updated = await sftpCall<Stats>(await this.sftp(uri), 'stat', uri.path);
+		this.readSnapshots.set(uri.toString(), { mtime: updated.mtime, size: updated.size });
 		this.changed(vscode.FileChangeType.Changed, uri);
 	}
 
 	async createDirectory(uri: vscode.Uri): Promise<void> {
 		await sftpCall<void>(await this.sftp(uri), 'mkdir', uri.path);
 		this.changed(vscode.FileChangeType.Created, uri);
+	}
+
+	async mode(uri: vscode.Uri): Promise<number> {
+		return (await sftpCall<Stats>(await this.sftp(uri), 'stat', uri.path)).mode;
+	}
+
+	async chmod(uri: vscode.Uri, mode: number): Promise<void> {
+		await sftpCall<void>(await this.sftp(uri), 'chmod', uri.path, mode);
+		this.changed(vscode.FileChangeType.Changed, uri);
+	}
+
+	async search(root: vscode.Uri, query: string, token: vscode.CancellationToken): Promise<vscode.Uri[]> {
+		const matches: vscode.Uri[] = [];
+		const pending = [root];
+		const needle = query.toLocaleLowerCase();
+		while (pending.length > 0 && matches.length < 200 && !token.isCancellationRequested) {
+			const directory = pending.pop();
+			if (!directory) { break; }
+			let entries: [string, vscode.FileType][];
+			try {
+				entries = await this.readDirectory(directory);
+			} catch {
+				continue; // Skip directories the SSH user cannot read.
+			}
+			for (const [name, type] of entries) {
+				const child = vscode.Uri.joinPath(directory, name);
+				if (name.toLocaleLowerCase().includes(needle)) { matches.push(child); }
+				// Do not recursively follow symlinks: they can form cycles across the server.
+				if ((type & vscode.FileType.Directory) !== 0 && (type & vscode.FileType.SymbolicLink) === 0) {
+					pending.push(child);
+				}
+				if (matches.length >= 200 || token.isCancellationRequested) { break; }
+			}
+		}
+		return matches;
 	}
 
 	async delete(uri: vscode.Uri, options: { recursive: boolean }): Promise<void> {
@@ -768,7 +962,11 @@ class SftpFileSystemProvider implements vscode.FileSystemProvider, vscode.Dispos
 	}
 }
 
-async function createConnectConfig(profile: ConnectionProfile, password?: string): Promise<ConnectConfig> {
+async function createConnectConfig(
+	context: vscode.ExtensionContext,
+	profile: ConnectionProfile,
+	password?: string,
+): Promise<ConnectConfig> {
 	const config: ConnectConfig = {
 		host: profile.host,
 		port: profile.port,
@@ -783,7 +981,50 @@ async function createConnectConfig(profile: ConnectionProfile, password?: string
 		const keyUri = vscode.Uri.file(expandHome(profile.privateKeyPath));
 		config.privateKey = Buffer.from(await vscode.workspace.fs.readFile(keyUri));
 	}
+	const hostId = `${profile.host}:${profile.port}`;
+	const hostKeys = context.globalState.get<Record<string, string>>(HOST_KEYS_KEY, {});
+	let trustedFingerprint = hostKeys[hostId];
+	if (!trustedFingerprint) {
+		const observed = await readHostFingerprint(config);
+		const choice = await vscode.window.showWarningMessage(
+			`First connection to ${hostId}. Verify its SSH host key fingerprint.`,
+			{ modal: true, detail: `SHA256 fingerprint: ${observed}\n\nOnly trust this key if it belongs to your VPS.` },
+			'Trust and Connect',
+		);
+		if (choice !== 'Trust and Connect') {
+			throw new Error('SSH host key was not trusted.');
+		}
+		trustedFingerprint = observed;
+		await context.globalState.update(HOST_KEYS_KEY, { ...hostKeys, [hostId]: observed });
+	}
+	config.hostHash = 'sha256';
+	config.hostVerifier = (fingerprint: string) => fingerprint === trustedFingerprint;
 	return config;
+}
+
+function readHostFingerprint(config: ConnectConfig): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const client = new Client();
+		let fingerprint: string | undefined;
+		let settled = false;
+		const finish = (error?: Error) => {
+			if (settled) { return; }
+			settled = true;
+			client.end();
+			if (fingerprint) { resolve(fingerprint); }
+			else { reject(error ?? new Error('The server did not provide an SSH host key.')); }
+		};
+		client.once('ready', () => finish());
+		client.once('error', (error) => finish(error));
+		client.connect({
+			...config,
+			hostHash: 'sha256',
+			hostVerifier: (value: string) => {
+				fingerprint = value;
+				return false;
+			},
+		});
+	});
 }
 
 function openSftp(config: ConnectConfig): Promise<ActiveConnection> {
@@ -909,4 +1150,4 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-export function deactivate(): void {}
+export function deactivate(): void { }

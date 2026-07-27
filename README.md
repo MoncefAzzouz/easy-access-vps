@@ -22,6 +22,11 @@ Easy VPS gives remote servers the same familiar file-management experience as a 
 - Automatic reconnection after restarting or reloading the editor.
 - Interactive SSH terminals inside the IDE Terminal panel.
 - **Open VPS Terminal Here** starts in a selected folder or the parent directory of the active remote file.
+- Remote file and folder name search with cancellable progress.
+- Recursive upload and download from the Explorer context menu.
+- Unix permission editing (`chmod`) for remote files and folders.
+- Save-conflict warnings when another process changes a remote file you are editing.
+- First-use SSH host fingerprint verification.
 - Passwords stored with VS Code Secret Storage—not in settings or profile files.
 
 ## Installation
@@ -66,6 +71,17 @@ Right-click any remote file or folder and choose **Open VPS Terminal Here**. The
 
 Normal interactive commands, colors, Ctrl+C, history, and terminal resizing are supported.
 
+## Remote file tools
+
+Right-click a remote file or folder in Explorer to:
+
+- **Search Remote Files** below the selected folder.
+- **Upload to VPS** from your computer.
+- **Download from VPS** to a local folder.
+- **Change Remote Permissions** using an octal mode such as `755` or `0644`.
+
+Large recursive transfers and searches show progress and can be cancelled.
+
 ## SSH config import
 
 Run **Easy VPS: Import from SSH Config** to import compatible hosts from `~/.ssh/config`. Host name, user, port, and identity-file values are recognized.
@@ -74,8 +90,8 @@ Run **Easy VPS: Import from SSH Config** to import compatible hosts from `~/.ssh
 
 - Passwords are stored using VS Code's encrypted Secret Storage.
 - Connection metadata—host, user, port, path, and private-key location—is stored in extension global state.
+- On first connection, Easy VPS displays the server's SHA256 host-key fingerprint and connects only after you trust it. Future connections reject a changed key.
 - SSH keys are recommended for production servers.
-- Easy VPS does not currently confirm new server host-key fingerprints. Only connect to servers you trust and verify sensitive servers through another trusted SSH client first.
 
 ## Commands
 
@@ -88,13 +104,16 @@ Run **Easy VPS: Import from SSH Config** to import compatible hosts from `~/.ssh
 - **Easy VPS: Disconnect VPS**
 - **Easy VPS: Remove VPS from Explorer**
 - **Easy VPS: Open VPS Terminal Here**
+- **Easy VPS: Search Remote Files**
+- **Easy VPS: Upload to VPS**
+- **Easy VPS: Download from VPS**
+- **Easy VPS: Change Remote Permissions**
 - **Easy VPS: Forget Saved Connection**
 
 ## Current limitations
 
 - SFTP has no standard live file-watching protocol. Refresh Explorer to see changes made outside the editor.
 - Copying or moving files between different VPS connections is not supported yet.
-- Symlinked directories may have limited Explorer behavior.
 - Remote debugging and remote language servers are outside its scope.
 
 ## Issues and source code
