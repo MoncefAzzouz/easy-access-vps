@@ -27,6 +27,10 @@ Easy VPS gives remote servers the same familiar file-management experience as a 
 - Unix permission editing (`chmod`) for remote files and folders.
 - Save-conflict warnings when another process changes a remote file you are editing.
 - First-use SSH host fingerprint verification.
+- Server monitoring for uptime, load, memory, disks, and top processes.
+- Live remote log streaming in the integrated terminal.
+- Local port forwarding for remote web apps, databases, and development services.
+- Automatic terminal connection retries for temporary SSH failures.
 - Passwords stored with VS Code Secret Storage—not in settings or profile files.
 
 ## Installation
@@ -82,6 +86,13 @@ Right-click a remote file or folder in Explorer to:
 
 Large recursive transfers and searches show progress and can be cancelled.
 
+## Developer tools
+
+- Run **Easy VPS: Show Server Monitor** to inspect a saved VPS without opening a separate terminal.
+- Run **Easy VPS: Follow Live Log**, select a VPS, and enter a path such as `/var/log/nginx/error.log`. Press `Ctrl+C` to stop following it.
+- Run **Easy VPS: Forward Remote Port**, enter the remote and local ports, then connect through `localhost:<local-port>`.
+- Run **Easy VPS: Stop Port Forwarding** to close an active tunnel and release its local port.
+
 ## SSH config import
 
 Run **Easy VPS: Import from SSH Config** to import compatible hosts from `~/.ssh/config`. Host name, user, port, and identity-file values are recognized.
@@ -108,6 +119,10 @@ Run **Easy VPS: Import from SSH Config** to import compatible hosts from `~/.ssh
 - **Easy VPS: Upload to VPS**
 - **Easy VPS: Download from VPS**
 - **Easy VPS: Change Remote Permissions**
+- **Easy VPS: Show Server Monitor**
+- **Easy VPS: Follow Live Log**
+- **Easy VPS: Forward Remote Port**
+- **Easy VPS: Stop Port Forwarding**
 - **Easy VPS: Forget Saved Connection**
 
 ## Current limitations

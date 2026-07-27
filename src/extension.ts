@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import * as net from 'node:net';
 import { Client, ClientChannel, ConnectConfig, SFTPWrapper, Stats } from 'ssh2';
 import * as vscode from 'vscode';
 
@@ -6,6 +7,7 @@ const SCHEME = 'easy-vps';
 const PROFILES_KEY = 'easy-vps.profiles';
 const LAST_PATH_KEY = 'easy-vps.lastRemotePath';
 const HOST_KEYS_KEY = 'easy-vps.hostKeys';
+const activeForwards = new Map<string, { server: net.Server; client: Client }>();
 type AuthType = 'password' | 'privateKey';
 const COMMON_REMOTE_PATHS = ['/', '/root', '/home', '/var/www', '/etc', '/opt', '/srv', '/tmp'];
 
@@ -28,6 +30,7 @@ interface ActiveConnection {
 export function activate(context: vscode.ExtensionContext): void {
 	const provider = new SftpFileSystemProvider(context);
 	const connections = new ConnectionTreeProvider(context, provider);
+	const monitorOutput = vscode.window.createOutputChannel('Easy VPS Monitor');
 	context.subscriptions.push(
 		vscode.workspace.registerFileSystemProvider(SCHEME, provider, {
 			isCaseSensitive: true,
@@ -64,11 +67,183 @@ export function activate(context: vscode.ExtensionContext): void {
 			downloadFromVps(uri)),
 		vscode.commands.registerCommand('easy-vps.permissions', (uri?: vscode.Uri) =>
 			changeRemotePermissions(provider, uri)),
+		vscode.commands.registerCommand('easy-vps.monitor', (target?: vscode.Uri | ConnectionTreeItem) =>
+			showServerMonitor(context, monitorOutput, target)),
+		vscode.commands.registerCommand('easy-vps.liveLog', (target?: vscode.Uri | ConnectionTreeItem) =>
+			openLiveLog(context, target)),
+		vscode.commands.registerCommand('easy-vps.forwardPort', (target?: vscode.Uri | ConnectionTreeItem) =>
+			forwardPort(context, target)),
+		vscode.commands.registerCommand('easy-vps.stopForwarding', () => stopPortForwarding()),
 		vscode.commands.registerCommand('easy-vps.disconnect', () => disconnectFromVps(provider)),
 		vscode.commands.registerCommand('easy-vps.forgetConnection', (item?: ConnectionItem) =>
 			forgetConnection(context, provider, connections, item?.profile)),
 		provider,
+		monitorOutput,
 	);
+}
+
+async function resolveProfile(
+	context: vscode.ExtensionContext,
+	target?: vscode.Uri | ConnectionTreeItem,
+): Promise<{ profile: ConnectionProfile; password?: string } | undefined> {
+	const uri = target instanceof vscode.Uri ? target : undefined;
+	let profile = target instanceof ConnectionItem || target instanceof RemotePathItem ? target.profile : undefined;
+	if (!profile && uri?.scheme === SCHEME) {
+		profile = getProfiles(context).find((item) => item.id === uri.authority);
+	}
+	if (!profile && vscode.window.activeTextEditor?.document.uri.scheme === SCHEME) {
+		profile = getProfiles(context).find((item) => item.id === vscode.window.activeTextEditor?.document.uri.authority);
+	}
+	if (!profile) {
+		profile = (await vscode.window.showQuickPick(
+			getProfiles(context).map((item) => ({ label: item.name, description: `${item.username}@${item.host}`, profile: item })),
+			{ placeHolder: 'Choose a VPS' },
+		))?.profile;
+	}
+	if (!profile) { return undefined; }
+	let password = profile.authType === 'password' ? await context.secrets.get(secretKey(profile.id)) : undefined;
+	if (profile.authType === 'password' && !password) {
+		password = await vscode.window.showInputBox({
+			prompt: `SSH password for ${profile.username}@${profile.host}`,
+			password: true,
+			ignoreFocusOut: true,
+		});
+		if (password === undefined) { return undefined; }
+		await context.secrets.store(secretKey(profile.id), password);
+	}
+	return { profile, password };
+}
+
+async function showServerMonitor(
+	context: vscode.ExtensionContext,
+	output: vscode.OutputChannel,
+	target?: vscode.Uri | ConnectionTreeItem,
+): Promise<void> {
+	const resolved = await resolveProfile(context, target);
+	if (!resolved) { return; }
+	await vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: `Reading ${resolved.profile.name} status…`,
+	}, async () => {
+		try {
+			const config = await createConnectConfig(context, resolved.profile, resolved.password);
+			const report = await executeSsh(config,
+				`printf 'SYSTEM\\n'; uname -a; printf '\\nUPTIME / LOAD\\n'; uptime; ` +
+				`printf '\\nMEMORY\\n'; (free -h 2>/dev/null || vm_stat 2>/dev/null); ` +
+				`printf '\\nDISK\\n'; df -h; printf '\\nTOP PROCESSES\\n'; ps -eo pid,pcpu,pmem,comm --sort=-pcpu 2>/dev/null | head -12`,
+			);
+			output.clear();
+			output.appendLine(`Easy VPS monitor — ${resolved.profile.name}`);
+			output.appendLine(`Updated: ${new Date().toLocaleString()}\n`);
+			output.append(report);
+			output.show(true);
+		} catch (error) {
+			vscode.window.showErrorMessage(`Could not read server status: ${errorMessage(error)}`);
+		}
+	});
+}
+
+async function openLiveLog(context: vscode.ExtensionContext, target?: vscode.Uri | ConnectionTreeItem): Promise<void> {
+	const resolved = await resolveProfile(context, target);
+	if (!resolved) { return; }
+	let logPath = target instanceof vscode.Uri && target.scheme === SCHEME ? target.path : undefined;
+	logPath = await vscode.window.showInputBox({
+		prompt: 'Remote log file to follow',
+		value: logPath && logPath !== '/' ? logPath : '/var/log/syslog',
+		placeHolder: '/var/log/nginx/error.log',
+		validateInput: (value) => value.startsWith('/') ? undefined : 'Enter an absolute remote path.',
+	});
+	if (!logPath) { return; }
+	try {
+		const config = await createConnectConfig(context, resolved.profile, resolved.password);
+		const terminal = vscode.window.createTerminal({
+			name: `${resolved.profile.name}: ${path.posix.basename(logPath)}`,
+			pty: new SshPseudoterminal(config, path.posix.dirname(logPath), `tail -n 200 -F -- ${shellQuote(logPath)}`),
+			iconPath: new vscode.ThemeIcon('output'),
+		});
+		terminal.show();
+	} catch (error) {
+		vscode.window.showErrorMessage(`Could not follow remote log: ${errorMessage(error)}`);
+	}
+}
+
+async function forwardPort(context: vscode.ExtensionContext, target?: vscode.Uri | ConnectionTreeItem): Promise<void> {
+	const resolved = await resolveProfile(context, target);
+	if (!resolved) { return; }
+	const remoteText = await ask('Remote port', 'Example: 3000 or 5432');
+	if (!remoteText || !validPort(remoteText)) { return; }
+	const localText = await ask('Local port', 'Port on this computer', remoteText, (value) => validPort(value) ? undefined : 'Enter a port from 1 to 65535');
+	if (!localText) { return; }
+	const config = await createConnectConfig(context, resolved.profile, resolved.password);
+	const forwardId = `${resolved.profile.id}:${localText}`;
+	if (activeForwards.has(forwardId)) {
+		vscode.window.showWarningMessage(`Local port ${localText} is already forwarded by Easy VPS.`);
+		return;
+	}
+	const client = new Client();
+	const server = net.createServer((socket) => {
+		client.forwardOut('127.0.0.1', socket.localPort ?? 0, '127.0.0.1', Number(remoteText), (error, stream) => {
+			if (error) { socket.destroy(error); return; }
+			socket.pipe(stream).pipe(socket);
+		});
+	});
+	client.once('ready', () => server.listen(Number(localText), '127.0.0.1', () => {
+		activeForwards.set(forwardId, { server, client });
+		vscode.window.showInformationMessage(
+			`${resolved.profile.name}:${remoteText} is available at localhost:${localText}.`,
+		);
+	}));
+	client.once('error', (error) => {
+		server.close();
+		vscode.window.showErrorMessage(`Port forwarding failed: ${error.message}`);
+	});
+	server.once('error', (error) => {
+		client.end();
+		vscode.window.showErrorMessage(`Could not listen on local port ${localText}: ${error.message}`);
+	});
+	context.subscriptions.push(new vscode.Disposable(() => {
+		activeForwards.delete(forwardId);
+		server.close();
+		client.end();
+	}));
+	client.connect(config);
+}
+
+async function stopPortForwarding(): Promise<void> {
+	const selected = await vscode.window.showQuickPick(
+		[...activeForwards.entries()].map(([id, forwarding]) => ({
+			label: `localhost:${id.split(':').at(-1)}`,
+			description: id,
+			id,
+			forwarding,
+		})),
+		{ placeHolder: activeForwards.size ? 'Choose a forwarding to stop' : 'No active Easy VPS port forwardings' },
+	);
+	if (!selected) { return; }
+	activeForwards.delete(selected.id);
+	selected.forwarding.server.close();
+	selected.forwarding.client.end();
+	vscode.window.showInformationMessage(`${selected.label} forwarding stopped.`);
+}
+
+function validPort(value: string): boolean {
+	const port = Number(value);
+	return Number.isInteger(port) && port > 0 && port <= 65_535;
+}
+
+function executeSsh(config: ConnectConfig, command: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const client = new Client();
+		let output = '';
+		client.once('ready', () => client.exec(command, (error, channel) => {
+			if (error) { client.end(); reject(error); return; }
+			channel.on('data', (data: Buffer) => { output += data.toString(); });
+			channel.stderr.on('data', (data: Buffer) => { output += data.toString(); });
+			channel.once('close', () => { client.end(); resolve(output); });
+		}));
+		client.once('error', reject);
+		client.connect(config);
+	});
 }
 
 async function searchRemoteFiles(provider: SftpFileSystemProvider, uri?: vscode.Uri): Promise<void> {
@@ -249,51 +424,82 @@ class SshPseudoterminal implements vscode.Pseudoterminal {
 	private readonly closeEmitter = new vscode.EventEmitter<number | void>();
 	readonly onDidWrite = this.writeEmitter.event;
 	readonly onDidClose = this.closeEmitter.event;
-	private readonly client = new Client();
+	private client?: Client;
 	private channel?: ClientChannel;
 	private closed = false;
+	private attempts = 0;
+	private dimensions?: vscode.TerminalDimensions;
 
-	constructor(private readonly config: ConnectConfig, private readonly cwd: string) { }
+	constructor(
+		private readonly config: ConnectConfig,
+		private readonly cwd: string,
+		private readonly initialCommand?: string,
+	) { }
 
 	open(dimensions?: vscode.TerminalDimensions): void {
+		this.dimensions = dimensions;
+		this.connect();
+	}
+
+	private connect(): void {
+		if (this.closed) { return; }
+		this.attempts += 1;
 		this.writeEmitter.fire(`\x1b[36mConnecting to ${this.config.username}@${this.config.host}…\x1b[0m\r\n`);
-		this.client.once('ready', () => {
-			this.client.shell({
+		const client = new Client();
+		this.client = client;
+		let sessionOpened = false;
+		client.once('ready', () => {
+			client.shell({
 				term: 'xterm-256color',
-				cols: dimensions?.columns ?? 80,
-				rows: dimensions?.rows ?? 24,
+				cols: this.dimensions?.columns ?? 80,
+				rows: this.dimensions?.rows ?? 24,
 			}, (error, channel) => {
-				if (error) { this.fail(error); return; }
+				if (error) { this.retryOrFail(error); return; }
+				sessionOpened = true;
+				this.attempts = 0;
 				this.channel = channel;
 				channel.on('data', (data: Buffer) => this.writeEmitter.fire(data.toString()));
 				channel.stderr.on('data', (data: Buffer) => this.writeEmitter.fire(data.toString()));
 				channel.once('close', () => this.finish(0));
 				channel.write(`cd -- ${shellQuote(this.cwd)}\r`);
+				if (this.initialCommand) { channel.write(`${this.initialCommand}\r`); }
 			});
 		});
-		this.client.once('error', (error) => this.fail(error));
-		this.client.once('close', () => this.finish());
-		this.client.connect(this.config);
+		client.once('error', (error) => {
+			if (!sessionOpened) { this.retryOrFail(error); }
+			else { this.writeEmitter.fire(`\r\n\x1b[31mSSH disconnected: ${error.message}\x1b[0m\r\n`); }
+		});
+		client.once('close', () => {
+			if (!sessionOpened && !this.closed) { this.retryOrFail(new Error('Connection closed before the shell opened.')); }
+		});
+		client.connect(this.config);
 	}
 
 	handleInput(data: string): void { this.channel?.write(data); }
 	setDimensions(dimensions: vscode.TerminalDimensions): void {
+		this.dimensions = dimensions;
 		this.channel?.setWindow(dimensions.rows, dimensions.columns, 0, 0);
 	}
 	close(): void {
 		this.channel?.end();
-		this.client.end();
+		this.client?.end();
 		this.finish();
 	}
 
-	private fail(error: Error): void {
+	private retryOrFail(error: Error): void {
+		this.client?.end();
+		if (!this.closed && this.attempts < 3) {
+			this.writeEmitter.fire(`\r\n\x1b[33mSSH connection failed: ${error.message}. Retrying…\x1b[0m\r\n`);
+			setTimeout(() => this.connect(), 1_500);
+			return;
+		}
 		this.writeEmitter.fire(`\r\n\x1b[31mSSH error: ${error.message}\x1b[0m\r\n`);
 		this.finish(1);
 	}
 	private finish(code?: number): void {
 		if (this.closed) { return; }
 		this.closed = true;
-		this.client.end();
+		this.client?.end();
 		this.closeEmitter.fire(code);
 		this.writeEmitter.dispose();
 		this.closeEmitter.dispose();

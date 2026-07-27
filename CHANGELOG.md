@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.5.0
+
+- Added a server monitor showing system details, uptime, load, memory, disks, and top processes.
+- Added live remote log streaming with `tail -F` in an integrated terminal.
+- Added secure local-to-remote TCP port forwarding and a command to stop active tunnels.
+- Added automatic terminal connection retries for transient SSH startup failures.
+
 ## 0.4.0
 
 - Added first-use SSH host fingerprint verification and remembered trusted host keys.

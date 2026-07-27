@@ -3,7 +3,7 @@
   "publisher": "moncefazzouz",
   "displayName": "Easy VPS",
   "description": "Browse and edit VPS files in VS Code Explorer over SSH/SFTP.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "MIT",
   "icon": "resources/icon.png",
   "repository": {
@@ -41,6 +41,10 @@
     "onCommand:easy-vps.upload",
     "onCommand:easy-vps.download",
     "onCommand:easy-vps.permissions",
+    "onCommand:easy-vps.monitor",
+    "onCommand:easy-vps.liveLog",
+    "onCommand:easy-vps.forwardPort",
+    "onCommand:easy-vps.stopForwarding",
     "onCommand:easy-vps.connect",
     "onCommand:easy-vps.disconnect",
     "onCommand:easy-vps.forgetConnection",
@@ -161,6 +165,30 @@
         "title": "Change Remote Permissions",
         "category": "Easy VPS",
         "icon": "$(lock)"
+      },
+      {
+        "command": "easy-vps.monitor",
+        "title": "Show Server Monitor",
+        "category": "Easy VPS",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "easy-vps.liveLog",
+        "title": "Follow Live Log",
+        "category": "Easy VPS",
+        "icon": "$(output)"
+      },
+      {
+        "command": "easy-vps.forwardPort",
+        "title": "Forward Remote Port",
+        "category": "Easy VPS",
+        "icon": "$(radio-tower)"
+      },
+      {
+        "command": "easy-vps.stopForwarding",
+        "title": "Stop Port Forwarding",
+        "category": "Easy VPS",
+        "icon": "$(debug-disconnect)"
       }
     ],
     "menus": {
@@ -233,6 +261,21 @@
           "command": "easy-vps.permissions",
           "when": "resourceScheme == easy-vps",
           "group": "easyVps@5"
+        },
+        {
+          "command": "easy-vps.liveLog",
+          "when": "resourceScheme == easy-vps",
+          "group": "easyVps@6"
+        },
+        {
+          "command": "easy-vps.monitor",
+          "when": "resourceScheme == easy-vps",
+          "group": "easyVps@7"
+        },
+        {
+          "command": "easy-vps.forwardPort",
+          "when": "resourceScheme == easy-vps",
+          "group": "easyVps@8"
         },
         {
           "command": "easy-vps.removeFromExplorer",
