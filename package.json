@@ -3,7 +3,7 @@
   "publisher": "moncefazzouz",
   "displayName": "Easy VPS",
   "description": "Browse and edit VPS files in VS Code Explorer over SSH/SFTP.",
-  "version": "0.2.7",
+  "version": "0.3.0",
   "license": "MIT",
   "icon": "resources/icon.png",
   "repository": {
@@ -36,6 +36,7 @@
     "onView:easyVps.connections",
     "onCommand:easy-vps.add",
     "onCommand:easy-vps.removeFromExplorer",
+    "onCommand:easy-vps.openTerminal",
     "onCommand:easy-vps.connect",
     "onCommand:easy-vps.disconnect",
     "onCommand:easy-vps.forgetConnection",
@@ -126,6 +127,12 @@
         "title": "Remove VPS from Explorer",
         "category": "Easy VPS",
         "icon": "$(close)"
+      },
+      {
+        "command": "easy-vps.openTerminal",
+        "title": "Open VPS Terminal Here",
+        "category": "Easy VPS",
+        "icon": "$(terminal)"
       }
     ],
     "menus": {
@@ -147,6 +154,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "easy-vps.openTerminal",
+          "when": "view == easyVps.connections",
+          "group": "inline@2"
+        },
         {
           "command": "easy-vps.connect",
           "when": "view == easyVps.connections",
@@ -170,15 +182,28 @@
       ],
       "explorer/context": [
         {
+          "command": "easy-vps.openTerminal",
+          "when": "resourceScheme == easy-vps",
+          "group": "easyVps@1"
+        },
+        {
           "command": "easy-vps.removeFromExplorer",
           "when": "resourceScheme == easy-vps",
           "group": "easyVps@100"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "easy-vps.openTerminal",
+          "when": "resourceScheme == easy-vps",
+          "group": "easyVps@1"
         }
       ],
       "commandPalette": [
         { "command": "easy-vps.add" },
         { "command": "easy-vps.advancedAdd" },
         { "command": "easy-vps.importSshConfig" },
+        { "command": "easy-vps.openTerminal" },
         {
           "command": "easy-vps.connect"
         },

@@ -20,6 +20,8 @@ Easy VPS gives remote servers the same familiar file-management experience as a 
 - Import profiles from `~/.ssh/config`.
 - Test, edit, reconnect, refresh, remove, or forget connections.
 - Automatic reconnection after restarting or reloading the editor.
+- Interactive SSH terminals inside the IDE Terminal panel.
+- **Open VPS Terminal Here** starts in a selected folder or the parent directory of the active remote file.
 - Passwords stored with VS Code Secret Storage—not in settings or profile files.
 
 ## Installation
@@ -53,6 +55,17 @@ Right-click a saved server to:
 
 Right-click a VPS entry in Explorer and choose **Remove VPS from Explorer** to hide it without deleting its saved connection.
 
+## VPS terminal
+
+Right-click any remote file or folder and choose **Open VPS Terminal Here**. The terminal opens an interactive SSH shell in the IDE:
+
+- For a folder, the shell starts inside that folder.
+- For a file, the shell starts inside its parent folder.
+- From the Easy VPS sidebar, the shell starts at the selected shortcut or saved default path.
+- Multiple VPS terminal tabs can run at the same time.
+
+Normal interactive commands, colors, Ctrl+C, history, and terminal resizing are supported.
+
 ## SSH config import
 
 Run **Easy VPS: Import from SSH Config** to import compatible hosts from `~/.ssh/config`. Host name, user, port, and identity-file values are recognized.
@@ -74,6 +87,7 @@ Run **Easy VPS: Import from SSH Config** to import compatible hosts from `~/.ssh
 - **Easy VPS: Edit Connection**
 - **Easy VPS: Disconnect VPS**
 - **Easy VPS: Remove VPS from Explorer**
+- **Easy VPS: Open VPS Terminal Here**
 - **Easy VPS: Forget Saved Connection**
 
 ## Current limitations
@@ -81,7 +95,7 @@ Run **Easy VPS: Import from SSH Config** to import compatible hosts from `~/.ssh
 - SFTP has no standard live file-watching protocol. Refresh Explorer to see changes made outside the editor.
 - Copying or moving files between different VPS connections is not supported yet.
 - Symlinked directories may have limited Explorer behavior.
-- Easy VPS provides file access only; terminals, remote debugging, and remote language servers are outside its scope.
+- Remote debugging and remote language servers are outside its scope.
 
 ## Issues and source code
 

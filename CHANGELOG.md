@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.3.0
+
+- Added interactive SSH terminals inside the IDE Terminal panel.
+- Added **Open VPS Terminal Here** for remote files, folders, sidebar servers, and path shortcuts.
+- Added automatic working-directory selection and support for multiple simultaneous VPS terminals.
+
 ## 0.2.7
 
 - Added the MIT License required for Open VSX distribution.

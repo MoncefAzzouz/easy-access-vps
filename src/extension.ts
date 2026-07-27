@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import { Client, ConnectConfig, SFTPWrapper, Stats } from 'ssh2';
+import { Client, ClientChannel, ConnectConfig, SFTPWrapper, Stats } from 'ssh2';
 import * as vscode from 'vscode';
 
 const SCHEME = 'easy-vps';
@@ -53,11 +53,129 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('easy-vps.refresh', () => connections.refresh()),
 		vscode.commands.registerCommand('easy-vps.removeFromExplorer', (uri?: vscode.Uri) =>
 			removeFromExplorer(provider, connections, uri)),
+		vscode.commands.registerCommand('easy-vps.openTerminal', (target?: vscode.Uri | ConnectionTreeItem) =>
+			openVpsTerminal(context, target)),
 		vscode.commands.registerCommand('easy-vps.disconnect', () => disconnectFromVps(provider)),
 		vscode.commands.registerCommand('easy-vps.forgetConnection', (item?: ConnectionItem) =>
 			forgetConnection(context, provider, connections, item?.profile)),
 		provider,
 	);
+}
+
+async function openVpsTerminal(
+	context: vscode.ExtensionContext,
+	target?: vscode.Uri | ConnectionTreeItem,
+): Promise<void> {
+	let uri = target instanceof vscode.Uri ? target : undefined;
+	let profile = target instanceof ConnectionItem || target instanceof RemotePathItem ? target.profile : undefined;
+	let remoteDirectory = target instanceof RemotePathItem ? target.remotePath : profile?.remotePath;
+
+	if (!uri && !profile && vscode.window.activeTextEditor?.document.uri.scheme === SCHEME) {
+		uri = vscode.window.activeTextEditor.document.uri;
+	}
+	if (uri?.scheme === SCHEME) {
+		profile = getProfiles(context).find((item) => item.id === uri?.authority);
+		if (profile) {
+			try {
+				const stat = await vscode.workspace.fs.stat(uri);
+				remoteDirectory = (stat.type & vscode.FileType.Directory) !== 0 ? uri.path : path.posix.dirname(uri.path);
+			} catch {
+				remoteDirectory = path.posix.dirname(uri.path);
+			}
+		}
+	}
+	if (!profile) {
+		const selected = await vscode.window.showQuickPick(
+			getProfiles(context).map((item) => ({ label: item.name, description: `${item.username}@${item.host}`, profile: item })),
+			{ placeHolder: 'Open a terminal on which VPS?' },
+		);
+		profile = selected?.profile;
+	}
+	if (!profile) { return; }
+	remoteDirectory ??= profile.remotePath;
+
+	let password = profile.authType === 'password' ? await context.secrets.get(secretKey(profile.id)) : undefined;
+	if (profile.authType === 'password' && !password) {
+		password = await vscode.window.showInputBox({
+			prompt: `SSH password for ${profile.username}@${profile.host}`,
+			password: true,
+			ignoreFocusOut: true,
+		});
+		if (password === undefined) { return; }
+		await context.secrets.store(secretKey(profile.id), password);
+	}
+
+	try {
+		const config = await createConnectConfig(profile, password);
+		const terminal = vscode.window.createTerminal({
+			name: `${profile.name}: ${remoteDirectory}`,
+			pty: new SshPseudoterminal(config, remoteDirectory),
+			iconPath: new vscode.ThemeIcon('remote'),
+		});
+		terminal.show();
+	} catch (error) {
+		vscode.window.showErrorMessage(`Could not open VPS terminal: ${errorMessage(error)}`);
+	}
+}
+
+class SshPseudoterminal implements vscode.Pseudoterminal {
+	private readonly writeEmitter = new vscode.EventEmitter<string>();
+	private readonly closeEmitter = new vscode.EventEmitter<number | void>();
+	readonly onDidWrite = this.writeEmitter.event;
+	readonly onDidClose = this.closeEmitter.event;
+	private readonly client = new Client();
+	private channel?: ClientChannel;
+	private closed = false;
+
+	constructor(private readonly config: ConnectConfig, private readonly cwd: string) {}
+
+	open(dimensions?: vscode.TerminalDimensions): void {
+		this.writeEmitter.fire(`\x1b[36mConnecting to ${this.config.username}@${this.config.host}…\x1b[0m\r\n`);
+		this.client.once('ready', () => {
+			this.client.shell({
+				term: 'xterm-256color',
+				cols: dimensions?.columns ?? 80,
+				rows: dimensions?.rows ?? 24,
+			}, (error, channel) => {
+				if (error) { this.fail(error); return; }
+				this.channel = channel;
+				channel.on('data', (data: Buffer) => this.writeEmitter.fire(data.toString()));
+				channel.stderr.on('data', (data: Buffer) => this.writeEmitter.fire(data.toString()));
+				channel.once('close', () => this.finish(0));
+				channel.write(`cd -- ${shellQuote(this.cwd)}\r`);
+			});
+		});
+		this.client.once('error', (error) => this.fail(error));
+		this.client.once('close', () => this.finish());
+		this.client.connect(this.config);
+	}
+
+	handleInput(data: string): void { this.channel?.write(data); }
+	setDimensions(dimensions: vscode.TerminalDimensions): void {
+		this.channel?.setWindow(dimensions.rows, dimensions.columns, 0, 0);
+	}
+	close(): void {
+		this.channel?.end();
+		this.client.end();
+		this.finish();
+	}
+
+	private fail(error: Error): void {
+		this.writeEmitter.fire(`\r\n\x1b[31mSSH error: ${error.message}\x1b[0m\r\n`);
+		this.finish(1);
+	}
+	private finish(code?: number): void {
+		if (this.closed) { return; }
+		this.closed = true;
+		this.client.end();
+		this.closeEmitter.fire(code);
+		this.writeEmitter.dispose();
+		this.closeEmitter.dispose();
+	}
+}
+
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
 async function removeFromExplorer(
@@ -472,21 +590,7 @@ class SftpFileSystemProvider implements vscode.FileSystemProvider, vscode.Dispos
 
 	async connect(profile: ConnectionProfile, password?: string): Promise<void> {
 		this.disconnect(profile.id);
-		const config: ConnectConfig = {
-			host: profile.host,
-			port: profile.port,
-			username: profile.username,
-			readyTimeout: 20_000,
-			keepaliveInterval: 15_000,
-			keepaliveCountMax: 3,
-		};
-		if (profile.authType === 'password') {
-			config.password = password;
-		} else if (profile.privateKeyPath) {
-			const keyUri = vscode.Uri.file(expandHome(profile.privateKeyPath));
-			config.privateKey = Buffer.from(await vscode.workspace.fs.readFile(keyUri));
-		}
-
+		const config = await createConnectConfig(profile, password);
 		const connection = await openSftp(config);
 		connection.client.on('error', (error) => {
 			this.connections.delete(profile.id);
@@ -662,6 +766,24 @@ class SftpFileSystemProvider implements vscode.FileSystemProvider, vscode.Dispos
 			{ type: vscode.FileChangeType.Changed, uri: vscode.Uri.joinPath(uri, '..') },
 		]);
 	}
+}
+
+async function createConnectConfig(profile: ConnectionProfile, password?: string): Promise<ConnectConfig> {
+	const config: ConnectConfig = {
+		host: profile.host,
+		port: profile.port,
+		username: profile.username,
+		readyTimeout: 20_000,
+		keepaliveInterval: 15_000,
+		keepaliveCountMax: 3,
+	};
+	if (profile.authType === 'password') {
+		config.password = password;
+	} else if (profile.privateKeyPath) {
+		const keyUri = vscode.Uri.file(expandHome(profile.privateKeyPath));
+		config.privateKey = Buffer.from(await vscode.workspace.fs.readFile(keyUri));
+	}
+	return config;
 }
 
 function openSftp(config: ConnectConfig): Promise<ActiveConnection> {
